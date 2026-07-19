@@ -1,0 +1,23 @@
+const express = require("express");
+const {
+    createConversation,
+    getConversations,
+    getMessages,
+    deleteConversation,
+    renameConversation,
+} = require("../controllers/conversationController");
+const { protect } = require("../middleware/authMiddleware");
+
+const router = express.Router();
+
+router
+    .route("/")
+    .get(protect, getConversations)
+    .post(protect, createConversation);
+router.route("/:id/messages").get(protect, getMessages);
+router
+    .route("/:id")
+    .delete(protect, deleteConversation)
+    .patch(protect, renameConversation);
+
+module.exports = router;

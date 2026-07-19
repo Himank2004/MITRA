@@ -1,0 +1,6 @@
+for backend:- brew services stop mongodb-community@6.0\nrm -f ~/Library/LaunchAgents/homebrew.mxcl.mongodb-community@6.0.plist\nbrew services start mongodb-community@6.0
+npm run dev
+
+for frontend:- npm start
+
+for theropy :- ./start_api
