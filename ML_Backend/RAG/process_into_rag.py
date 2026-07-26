@@ -53,8 +53,12 @@ def ingest_text_to_chroma(
 
     # 4. Create a text splitter to chunk large texts
     #    Adjust chunk_size/chunk_overlap as needed for your use case.
-    text_splitter = CharacterTextSplitter(
-        chunk_size=1000, chunk_overlap=200, separator="\n"
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+        separators=["\n\n", "\n", " ", ""],
     )
 
     # 5. Ingest each document from JSON
