@@ -1,7 +1,7 @@
 """
 Shared embedding model singleton for the entire ML_Backend.
 
-All modules (RAG, MemoryBot, etc.) import from here so the model is
+All modules (RAG2, MemoryBot, etc.) import from here so the model is
 loaded exactly once per process.
 
 Model: sentence-transformers/all-mpnet-base-v2  (768-dim, normalised)
@@ -9,6 +9,8 @@ Model: sentence-transformers/all-mpnet-base-v2  (768-dim, normalised)
 
 from __future__ import annotations
 from typing import Optional
+
+from RAG2.config import EMBEDDING_MODEL
 
 _embeddings = None
 
@@ -24,9 +26,9 @@ def get_embeddings():
         from langchain_huggingface import HuggingFaceEmbeddings
         import torch
 
-        print("[SharedEmbeddings] Loading sentence-transformers/all-mpnet-base-v2 …")
+        print(f"[SharedEmbeddings] Loading {EMBEDDING_MODEL} …")
         _embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/all-mpnet-base-v2",
+            model_name=EMBEDDING_MODEL,
             model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"},
             encode_kwargs={"normalize_embeddings": True},
         )

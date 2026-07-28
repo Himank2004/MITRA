@@ -29,7 +29,7 @@
 # # from langchain.agents import AgentType
 # from langchain.agents import create_agent
 # from langchain.messages import SystemMessage, HumanMessage, AIMessage
-# from RAG.retreive_books import query_retriever
+# from RAG2.retriever import query_retriever
 # from EmotionBot.bot import emotion_detection
 
 # # Import from parent ML_Backend/constants.py (avoiding circular import)
@@ -861,7 +861,7 @@ from langchain_core.messages import BaseMessage
 # from langchain.agents import AgentType
 from langchain.agents import create_agent
 from langchain.messages import SystemMessage, HumanMessage, AIMessage
-from RAG.retreive_books import query_retriever
+from RAG2.retriever import query_retriever
 from EmotionBot.bot import emotion_detection
 
 # Import from parent ML_Backend/constants.py (avoiding circular import)
@@ -1165,6 +1165,7 @@ class TherapyAgent:
             print(f"\n[RISK ASSESSMENT]")
             print(f"  Level: {risk_result.get('risk_level')}")
             print(f"  Confidence: {risk_result.get('confidence'):.2%}")
+            # print(f"  Rag: {rag_docs_task.result()[1] if rag_docs_task.done() else 'N/A'}")
             print(f"  Mode: {risk_mode}")
             signals = risk_result.get("signals", [])
             if signals:

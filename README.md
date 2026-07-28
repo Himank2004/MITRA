@@ -48,6 +48,19 @@
 
 ---
 
+## RAG Index Setup
+
+From the repository root, perform a full local book-index rebuild with:
+
+```bash
+cd ML_Backend
+python RAG2/test_ingest.py
+```
+
+The active book index is the `mental_health_books` collection in `ML_Backend/RAG2/chroma_db`. It is managed by the RAG2 ingestion pipeline. Do not run the rebuild command during application startup.
+
+---
+
 ## Research Integration
 
 - Emotion models trained on ESC/ESConv, mental health FAQs, and therapy transcripts.

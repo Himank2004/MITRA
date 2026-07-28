@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import logging
+from pathlib import Path
 
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
@@ -12,6 +14,7 @@ try:
     from .config import (
         CHROMA_DIR,
         COLLECTION_NAME,
+        RETRIEVAL_RETURN_LOW_CONFIDENCE_FALLBACK,
         RETRIEVAL_SIMILARITY_THRESHOLD,
         RETRIEVAL_TOP_K,
     )
@@ -20,6 +23,7 @@ except ImportError:  # Supports ``python retriever.py "query"`` from RAG2.
     from config import (
         CHROMA_DIR,
         COLLECTION_NAME,
+        RETRIEVAL_RETURN_LOW_CONFIDENCE_FALLBACK,
         RETRIEVAL_SIMILARITY_THRESHOLD,
         RETRIEVAL_TOP_K,
     )
@@ -27,6 +31,7 @@ except ImportError:  # Supports ``python retriever.py "query"`` from RAG2.
 
 
 NO_RELEVANT_CONTEXT = "No relevant context found."
+LOGGER = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -51,12 +56,50 @@ def retrieve(query: str) -> list[RetrievedChunk] | str:
         query,
         k=RETRIEVAL_TOP_K,
     )
-    results = [
+    all_results = [
         RetrievedChunk(document=document, similarity_score=score)
         for document, score in scored_documents
-        if score >= RETRIEVAL_SIMILARITY_THRESHOLD
     ]
-    return results or NO_RELEVANT_CONTEXT
+    confident_results = [
+        result
+        for result in all_results
+        if result.similarity_score >= RETRIEVAL_SIMILARITY_THRESHOLD
+    ]
+    if confident_results:
+        LOGGER.info("RAG2 retrieved %d chunks above the similarity threshold.", len(confident_results))
+        return confident_results
+    if all_results and RETRIEVAL_RETURN_LOW_CONFIDENCE_FALLBACK:
+        LOGGER.warning(
+            "RAG2 found no chunks above %.2f; passing %d low-confidence semantic chunks.",
+            RETRIEVAL_SIMILARITY_THRESHOLD,
+            len(all_results),
+        )
+        return all_results
+    LOGGER.info("RAG2 found no relevant context.")
+    return NO_RELEVANT_CONTEXT
+
+
+def query_retriever(query: str) -> tuple[str, list[str]]:
+    """Return prompt-ready context and source labels for existing bot callers.
+
+    This is an adapter for TaskBot and TherapyBot. It uses only the semantic
+    RAG2 retrieval above and never accesses the legacy RAG collection.
+    """
+    results = retrieve(query)
+    if isinstance(results, str):
+        return "", []
+
+    context = "\n\n".join(result.document.page_content for result in results)
+    sources = [_source_label(result.document) for result in results]
+    return context, sources
+
+
+def _source_label(document: Document) -> str:
+    """Build a concise filename-and-location label from chunk metadata."""
+    metadata = document.metadata
+    filename = metadata.get("filename") or Path(metadata.get("source", "unknown")).name
+    location = metadata.get("page_number", metadata.get("chapter"))
+    return f"{filename}:{location}" if location is not None else str(filename)
 
 
 def print_retrieval(query: str) -> None:

@@ -160,7 +160,7 @@ class Taskbot:
         # Optional RAG enrichment — retrieve therapy book excerpts relevant to the task goal
         if self.use_rag:
             try:
-                from RAG.retreive_books import query_retriever
+                from RAG2.retriever import query_retriever
 
                 rag_context, _ = await asyncio.to_thread(
                     query_retriever, f"Tasks for: {reason}"

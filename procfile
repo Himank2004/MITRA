@@ -1,2 +1,2 @@
-python RAG/process_into_rag.py RAG/output_cleaned.json --persist_dir books_chroma_db
+release: cd ML_Backend && python RAG/process_into_rag.py
 web: gunicorn --worker-class gevent --bind 0.0.0.0:$PORT app:app
