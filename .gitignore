@@ -46,6 +46,8 @@ venv/
 # Application specific
 User_Embeddings/
 books_chroma_db/
+ML_Backend/RAG2/chroma_db/
+ML_Backend/RAG2/manifest.json
 uploads/*
 !uploads/.gitkeep
 README_for_tasks.md
