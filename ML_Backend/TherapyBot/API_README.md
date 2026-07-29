@@ -32,6 +32,29 @@ PORT=5000
 # Add your API keys and other configs here
 ```
 
+### LangSmith tracing (optional)
+
+To see each `/chat` request and its `rag_docs`, `emotion_task`,
+`strategy_task`, `memory_task`, `risk_task`, and LangGraph/LLM spans, add the
+following to `ML_Backend/.env` and restart the API:
+
+```env
+LANGSMITH_TRACING=true
+LANGSMITH_API_KEY=your_langsmith_api_key
+LANGSMITH_PROJECT=MITRA
+LANGSMITH_ENDPOINT=https://api.smith.langchain.com
+# Mental-health prompts, memories, retrieved text, and responses stay out of traces.
+LANGSMITH_HIDE_INPUTS=true
+LANGSMITH_HIDE_OUTPUTS=true
+```
+
+Open the `MITRA` project in LangSmith after sending a chat message. The four
+analysis tasks run concurrently, so they display as sibling spans beneath the
+`Chat` root rather than as a serial sequence.
+
+For a non-US LangSmith workspace, use the region-specific endpoint shown in
+your LangSmith settings instead of the US endpoint above.
+
 ### 3. Run the Server
 
 ```bash

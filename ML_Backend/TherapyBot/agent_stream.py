@@ -878,6 +878,14 @@ RATE_LIMIT_SIGNALS = constants_module.RATE_LIMIT_SIGNALS
 
 from agent_utils import is_rate_limit_error, build_llm, clean_json_response
 from agent_tools import save_memory_to_db, create_therapy_task
+from observability import (
+    add_metadata,
+    hash_identifier,
+    redact_inputs,
+    redact_outputs,
+    trace_failure,
+    traceable,
+)
 
 # ---------------------------------------------------------------------------
 # Strategy bot version — set STRATEGY_BOT_VERSION=1 in .env to use the
@@ -959,6 +967,104 @@ def _stream_content_to_text(content: Any) -> str:
             if isinstance(text, str):
                 text_parts.append(text)
     return "".join(text_parts)
+
+
+@traceable(
+    name="rag_docs",
+    run_type="retriever",
+    process_inputs=redact_inputs,
+    process_outputs=redact_outputs,
+)
+def _traced_rag_docs(query: str):
+    """Retrieve RAG context without exposing query or source text in traces."""
+    try:
+        context, sources = query_retriever(query)
+        add_metadata(
+            status="success",
+            source_count=len(sources),
+            context_available=bool(context),
+        )
+        return context, sources
+    except Exception:
+        trace_failure()
+        raise
+
+
+@traceable(
+    name="emotion_task",
+    run_type="chain",
+    process_inputs=redact_inputs,
+    process_outputs=redact_outputs,
+)
+async def _traced_emotion_task(query: str):
+    try:
+        result = await emotion_detection(query)
+        add_metadata(status="success", emotion_count=len(result or []))
+        return result
+    except Exception:
+        trace_failure()
+        raise
+
+
+@traceable(
+    name="strategy_task",
+    run_type="chain",
+    process_inputs=redact_inputs,
+    process_outputs=redact_outputs,
+)
+async def _traced_strategy_task(messages: list):
+    try:
+        reasoning, strategies = await predict_therapy_strategy(messages)
+        strategy_count = (
+            int(bool(strategies.strip()))
+            if isinstance(strategies, str)
+            else len(strategies or [])
+        )
+        add_metadata(status="success", strategy_count=strategy_count)
+        return reasoning, strategies
+    except Exception:
+        trace_failure()
+        raise
+
+
+@traceable(
+    name="memory_task",
+    run_type="retriever",
+    process_inputs=redact_inputs,
+    process_outputs=redact_outputs,
+)
+def _traced_memory_task(memory_bot: MemoryBot, user_id: str, query: str):
+    try:
+        instruct_context, info_context = memory_bot.retrieve_memories(user_id, query)
+        add_metadata(
+            status="success",
+            instruct_memory_count=len([line for line in instruct_context.splitlines() if line.strip()]),
+            info_memory_count=len([line for line in info_context.splitlines() if line.strip()]),
+        )
+        return instruct_context, info_context
+    except Exception:
+        trace_failure()
+        raise
+
+
+@traceable(
+    name="risk_task",
+    run_type="chain",
+    process_inputs=redact_inputs,
+    process_outputs=redact_outputs,
+)
+async def _traced_risk_task(risk_assessor: RiskAssessor, recent_text: list[str]):
+    try:
+        result = await risk_assessor.assess(recent_text)
+        add_metadata(
+            status="success",
+            risk_level=result.get("risk_level", "unknown"),
+            signal_count=len(result.get("signals", [])),
+        )
+        return result
+    except Exception:
+        trace_failure()
+        raise
 
 
 # The helper functions and class below implement the chatbot runtime.
@@ -1073,8 +1179,23 @@ class TherapyAgent:
             self._agent_cache[idx] = agent
         return self._agent_cache[idx]
 
+    @traceable(
+        name="Chat",
+        run_type="chain",
+        process_inputs=redact_inputs,
+        process_outputs=redact_outputs,
+    )
     async def chat(self, query: str, conversation_id: str, user_id: str):
         """Process one user message and stream text chunks plus final metadata."""
+        alias, provider, model_id = MODEL_HIERARCHY[0]
+        add_metadata(
+            request_mode="chat",
+            conversation_id_hash=hash_identifier(conversation_id),
+            user_id_hash=hash_identifier(user_id),
+            initial_model_alias=alias,
+            initial_provider=provider,
+            initial_model_id=model_id,
+        )
         # LangGraph uses thread_id to keep checkpoints isolated per conversation.
         thread_id = conversation_id
 
@@ -1084,7 +1205,13 @@ class TherapyAgent:
             configurable={
                 "thread_id": thread_id,
                 "user_id": user_id,
-            }
+            },
+            run_name="LLM call",
+            metadata={
+                "request_mode": "chat",
+                "conversation_id_hash": hash_identifier(conversation_id),
+                "user_id_hash": hash_identifier(user_id),
+            },
         )
         # Read the latest in-memory checkpoint, if this conversation is already warm.
         checkpoint = self.agent.checkpointer.get(config)
@@ -1127,21 +1254,21 @@ class TherapyAgent:
 
         # concurrent async tasks (RAG, emotion, strategy, memories, risk assessment run in parallel)
         # Run blocking RAG retrieval in a worker thread so it does not block the event loop.
-        rag_docs_task = asyncio.create_task(asyncio.to_thread(query_retriever, query))
+        rag_docs_task = asyncio.create_task(asyncio.to_thread(_traced_rag_docs, query))
         # Detect the emotional tone of the current message concurrently.
-        emotion_task = asyncio.create_task(emotion_detection(query))
+        emotion_task = asyncio.create_task(_traced_emotion_task(query))
         # Predict which therapeutic strategy is most suitable for the recent dialogue.
-        strategy_task = asyncio.create_task(predict_therapy_strategy(recent_msgs))
+        strategy_task = asyncio.create_task(_traced_strategy_task(recent_msgs))
         # Fetch relevant long-term memories without blocking other analysis tasks.
         memory_task = asyncio.create_task(
-            asyncio.to_thread(self.memory_bot.retrieve_memories, user_id, query)
+            asyncio.to_thread(_traced_memory_task, self.memory_bot, user_id, query)
         )
         # Collect recent messages for risk assessment
         recent_text = [
             m.content if hasattr(m, "content") else str(m) for m in recent_msgs
         ]
         # Assess safety risk using the recent conversation text.
-        risk_task = asyncio.create_task(self.risk_assessor.assess(recent_text))
+        risk_task = asyncio.create_task(_traced_risk_task(self.risk_assessor, recent_text))
 
         emotion_result, strategy_result, rag_result, memory_result, risk_result = (
             await asyncio.gather(
@@ -1187,6 +1314,14 @@ class TherapyAgent:
         while attempts < self.retry_count and not successful:
             active_agent = self._get_agent(current_idx)
             try:
+                active_alias, active_provider, active_model_id = MODEL_HIERARCHY[current_idx]
+                add_metadata(
+                    retry_attempt=attempts,
+                    model_hierarchy_index=current_idx,
+                    active_model_alias=active_alias,
+                    active_provider=active_provider,
+                    active_model_id=active_model_id,
+                )
                 # Combine all retrieved info into a single user message string
                 message_text = f"""
                     [INTERNAL SYSTEM CONTEXT — silent background knowledge from resources that may be helpful, do NOT mention, quote, or refer to this in your reply, never tell the user about these excerpts or that you consulted any books]
@@ -1408,6 +1543,11 @@ class TherapyAgent:
                         f"switching to '{next_alias}'."
                     )
                     print(f"[TherapyAgent] Original error: {e}")
+                    add_metadata(
+                        fallback_triggered=True,
+                        fallback_from=MODEL_HIERARCHY[current_idx][0],
+                        fallback_to=next_alias,
+                    )
                     # Copy checkpointer history so next agent has context
                     try:
                         next_agent = self._get_agent(next_idx)
@@ -1419,11 +1559,13 @@ class TherapyAgent:
                     current_idx = next_idx
                 else:
                     attempts += 1
+                    add_metadata(retry_attempt=attempts, last_error_type=type(e).__name__)
                     print(f"Error on attempt {attempts}: {e}")
                     await asyncio.sleep(2**attempts)
         if DEBUG_FLAGS["checkpoint"]:
             self.debug_agent(user_id, conversation_id)
         if not successful:
+            trace_failure()
             raise Exception("Failed after retries.") from last_exception
 
         # Yield metadata so app.py can persist the turn and forward tool events
